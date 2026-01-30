@@ -1,6 +1,6 @@
 const admin = require("firebase-admin");
 
-// Handle Private Key newlines
+// 1. Setup Service Account
 const serviceAccount = {
   projectId: process.env.FIREBASE_PROJECT_ID,
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
@@ -16,58 +16,50 @@ if (!admin.apps.length) {
 }
 
 export default async function handler(req, res) {
-  // --- CORS HEADERS (VERY IMPORTANT) ---
-  res.setHeader("Access-Control-Allow-Origin", "*"); // Allow ALL
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  // 2. CORS Headers (ताकि Network Error न आए)
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // Handle Preflight Request (Browser Check)
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  // Only Allow POST
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
   try {
-    const { title, body, image, link, type } = req.body;
+    // 3. Data Receive करें (Frontend से)
+    const { title, body, image, type, link } = req.body;
 
     if (!title || !body) {
-      return res.status(400).json({ error: "Missing Title/Body" });
+      return res.status(400).json({ error: "Title and Body are required" });
     }
 
-    // Prepare Android Notification Payload
+    // 4. Advanced Message Payload (Image + Data के साथ)
     const message = {
-      topic: "all",
-      // Data payload is preferred for background handling
+      // Notification block: Notification Tray में दिखता है
+      notification: {
+        title: title,
+        body: body,
+        // Image support (Android basic support)
+        ...(image && { imageUrl: image }) 
+      },
+      // Data block: App के अंदर Logic handle करने के लिए (Click Action)
       data: {
         title: title,
         body: body,
         image: image || "",
-        link: link || "",
-        type: type || "general"
+        type: type || "general", // link, update, general
+        link: link || ""
       },
-      // Notification payload for system tray when app is killed
-      notification: {
-        title: title,
-        body: body,
-      },
-      android: {
-        priority: "high",
-        notification: {
-          sound: "default",
-          imageUrl: image || undefined // Native image support
-        }
-      }
+      topic: "all"
     };
 
+    // 5. Send to Firebase
     const response = await admin.messaging().send(message);
+    console.log("Sent:", response);
+    
     return res.status(200).json({ success: true, id: response });
 
   } catch (error) {
-    console.error("FCM Error:", error);
-    return res.status(500).json({ error: error.message || "Internal Server Error" });
+    console.error("Vercel Error:", error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 }
